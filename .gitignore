@@ -1,2 +1,5 @@
 .DS_Store
 config.cfg
+/venv
+/pictures
+/.idea

@@ -1,3 +1,5 @@
+from datetime import datetime
+
 import tweepy
 import os
 from tweepy import OAuthHandler
@@ -18,6 +20,7 @@ def parse_arguments():
     parser.add_argument('--retweets', default=False, action='store_true', help='Include retweets')
     parser.add_argument('--replies', default=False, action='store_true', help='Include replies')
     parser.add_argument('--output', default='pictures/', type=str, help='folder where the pictures will be stored')
+    parser.add_argument('--timeline', default='2021-04-03 00:00:00', type=str, help='first tweet time(desc)')
 
     args = parser.parse_args()
     return args
@@ -66,9 +69,11 @@ def create_folder(output_folder):
         os.makedirs(output_folder)
 
 
-def download_images(status, num_tweets, output_folder):
+def download_images(status, num_tweets, output_folder, timeline):
     create_folder(output_folder)
     downloaded = 0
+
+    error_url_map = {}
 
     for tweet_status in status:
         if downloaded >= num_tweets:
@@ -76,27 +81,39 @@ def download_images(status, num_tweets, output_folder):
 
         for count, media_url in enumerate(tweet_media_urls(tweet_status)):
             # Only download if there is not a picture with the same name in the folder already
-            created = tweet_status.created_at.strftime('%d-%m-%y at %H.%M.%S')
-            file_name = "{}_({}).jpg".format(created, count + 1)
+            threshold = datetime.strptime(timeline, "%Y-%m-%d %H:%M:%S")
+            created = tweet_status.created_at.strftime('%Y-%m-%d %H.%M.%S')
+            file_name = "{}_{}.jpg".format(created, count + 1)
+            if threshold < tweet_status.created_at:
+                print("curr tweet:" + file_name + ",skip:" + media_url)
+                continue
             if not os.path.exists(os.path.join(output_folder, file_name)):
                 print(media_url)
-                print(output_folder + '/' + file_name)
+                print(output_folder + file_name)
                 # TODO: Figure out how to include ':orig' at the end in a way that works with wget to get the
                 # full size resolution
-                wget.download(media_url, out=output_folder + '/' + file_name)
+                try:
+                    wget.download(media_url, out=output_folder + file_name)
+                except Exception as e:
+                    error_url_map[file_name] = media_url
+                    print("error when wget " + created + ",url:" + media_url)
+                    print(e)
+                    pass
                 downloaded += 1
+    print("download completed")
+    print(error_url_map)
 
 
-def download_images_by_user(api, username, retweets, replies, num_tweets, output_folder):
+def download_images_by_user(api, username, retweets, replies, num_tweets, output_folder, timeline):
     status = tweepy.Cursor(api.user_timeline, screen_name=username, include_rts=retweets, exclude_replies=replies,
                            tweet_mode='extended').items()
-    download_images(status, num_tweets, output_folder)
+    download_images(status, num_tweets, "pictures/" + username + "/", timeline)
 
 
-def download_images_by_tag(api, tag, retweets, replies, num_tweets, output_folder):
+def download_images_by_tag(api, tag, retweets, replies, num_tweets, output_folder, timeline):
     status = tweepy.Cursor(api.search, '#' + tag, include_rts=retweets, exclude_replies=replies,
                            tweet_mode='extended').items()
-    download_images(status, num_tweets, output_folder)
+    download_images(status, num_tweets, "pictures/" + "#" + tag + "/", timeline)
 
 
 def main():
@@ -108,15 +125,16 @@ def main():
     num_tweets = arguments.num
     output_folder = arguments.output
     config_path = arguments.config
+    timeline = arguments.timeline
 
     config = parse_config(config_path)
     auth = authorise_twitter_api(config)
     api = tweepy.API(auth, wait_on_rate_limit=True)
 
     if hashtag:
-        download_images_by_tag(api, hashtag, retweets, replies, num_tweets, output_folder)
+        download_images_by_tag(api, hashtag, retweets, replies, num_tweets, output_folder, timeline)
     else:
-        download_images_by_user(api, username, retweets, replies, num_tweets, output_folder)
+        download_images_by_user(api, username, retweets, replies, num_tweets, output_folder, timeline)
 
 
 if __name__ == '__main__':
